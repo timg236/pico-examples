@@ -1,0 +1,85 @@
+// OTA deployment lifecycle for docs/api.md
+// Regenerate: dot -Tsvg ota-lifecycle.dot -o ota-lifecycle.svg
+digraph G {
+  graph [bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.45",
+         fontname="Lato", newrank=true];
+  node  [shape=box, style="rounded,filled", fontname="Lato", fontsize=13,
+         fillcolor="#C7053D", fontcolor="white", color="#9E0430", penwidth=0,
+         margin="0.18,0.08"];
+  edge  [fontname="Lato", fontsize=11, color="#555555", fontcolor="#555555",
+         arrowsize=0.7];
+
+  // Bootrom
+  reset [label=<<B>Reset</B><BR/><FONT POINT-SIZE="11">bootrom boots the highest-version<BR/>valid A/B image</FONT>>,
+         fillcolor="#2F3B45"];
+
+  subgraph cluster_boot {
+    label=<<B>Start-up</B>>; fontsize=15; fontcolor="#333333";
+    style="rounded,filled"; fillcolor="#F7F7F7"; color="#DDDDDD"; margin=14;
+
+    init [label=<<B>1–2</B>  ffs_initialise()<BR/>rpi_connect_ota_init()<BR/><FONT POINT-SIZE="11">FFS token, else OTP identity exchange</FONT>>];
+    sync [label=<<B>3</B>  rpi_connect_ota_boot_sync()<BR/><FONT POINT-SIZE="11">register OTA capability</FONT>>];
+    applying [label="status\nAPPLYING?", shape=diamond, style=filled,
+              fillcolor="#6B4A5A", fontsize=11, margin="0.02,0.02"];
+    fu [label="flash-update\nboot?", shape=diamond, style=filled,
+        fillcolor="#2F3B45", fontsize=11, margin="0.02,0.02"];
+    complete [label=<complete_deployment()<BR/>handle_boot() → <B>buy</B>>];
+    rolled [label=<fail_deployment()<BR/><FONT POINT-SIZE="11">update rolled back</FONT>>];
+    catchup [label=<<B>4</B>  resume, else<BR/>rpi_connect_get_pending_deployment()>];
+    listen [label=<<B>5</B>  rpi_connect_ota_event_listen()<BR/><FONT POINT-SIZE="11">optional SSE push</FONT>>];
+  }
+
+  subgraph cluster_loop {
+    label=<<B>Main loop</B>>; fontsize=15; fontcolor="#333333";
+    style="rounded,filled"; fillcolor="#F7F7F7"; color="#DDDDDD"; margin=14;
+
+    start [label=<<B>6</B>  rpi_connect_ota_start_deployment()<BR/>rpi_connect_ota_install_update_start()>];
+    poll [label=<async_context_poll()<BR/>rpi_connect_ota_install_update_poll()<BR/><FONT POINT-SIZE="11">stream to inactive slot · SHA-256</FONT>>];
+    ok [label="verified?", shape=diamond, style=filled,
+        fillcolor="#2F3B45", fontsize=11, margin="0.02,0.02"];
+    apply [label=<<B>7</B>  set_deployment_status(APPLYING)<BR/>try_booting_to_flash_update()>];
+    dlfail [label=<fail_deployment()>];
+  }
+
+  server [label=<<B>Raspberry Pi Connect</B><BR/><FONT POINT-SIZE="11">deployment assigned</FONT>>,
+          fillcolor="#F2F2F2", fontcolor="#333333"];
+
+  reset -> init;
+  init -> sync;
+  sync -> applying;
+  applying -> fu [label=" yes"];
+  applying -> catchup [label=" no"];
+  fu -> complete [label=" yes"];
+  fu -> rolled [label=" no"];
+  complete -> catchup [label=<<FONT COLOR="#6B4A5A"> IDLE</FONT>>];
+  rolled -> catchup [label=<<FONT COLOR="#6B4A5A"> IDLE</FONT>>];
+  catchup -> listen;
+
+  server -> start [style=dashed, label=<  deploy event<BR/>  <FONT POINT-SIZE="10">(SSE, step 5)</FONT>>];
+  catchup -> start [style=dashed, label=" pending / resumed"];
+  start -> poll [label=<<FONT COLOR="#6B4A5A"> DOWNLOADING</FONT>>];
+  poll -> poll [label=" more data"];
+  poll -> ok;
+  ok -> dlfail [label=" no"];
+  ok -> apply [label=" yes"];
+  dlfail -> start [style=invis];
+  apply -> reset [style=bold, color="#C7053D", fontcolor="#C7053D",
+                  tailport=w, headport=e, constraint=false,
+                  label=<<FONT COLOR="#6B4A5A">APPLYING</FONT><BR/>reboot to new image>];
+  sync -> reset [style=dashed, constraint=false,
+                 label=<new image fails before buy:<BR/>bootrom rolls back on next reset>];
+
+  { rank=same; complete; rolled; server; }
+  { rank=same; catchup; start; }
+  { rank=same; listen; poll; }
+
+  // Legend
+  legend [shape=plain, style="", fontcolor="#333333", label=<
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4" CELLPADDING="3"><TR>
+      <TD BGCOLOR="#C7053D" WIDTH="14" HEIGHT="14"></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="11">Library call   </FONT></TD>
+      <TD BGCOLOR="#6B4A5A" WIDTH="14"></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="11">Deployment status in FFS   </FONT></TD>
+      <TD BGCOLOR="#2F3B45" WIDTH="14"></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="11">Bootrom / hardware   </FONT></TD>
+      <TD BGCOLOR="#F2F2F2" WIDTH="14"></TD><TD ALIGN="LEFT"><FONT POINT-SIZE="11">Connect server</FONT></TD>
+    </TR></TABLE>>];
+  apply -> legend [style=invis];
+}

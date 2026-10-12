@@ -95,14 +95,11 @@ step 3 after the reboot. On a failed download, call
 
 ## Deployment lifecycle
 
-The status is persisted in FFS (`RPI_CONNECT_FFS_DEPLOYMENT_STATUS`):
+![OTA deployment lifecycle](ota-lifecycle.svg)
 
-```
-IDLE ──start──▶ DOWNLOADING ──verified──▶ APPLYING ──reboot──▶ boot sync ──▶ IDLE
-                    │                                              │
-                    └──── failed: fail_deployment() ──▶ IDLE       ├─ flash-update boot: report success, buy
-                                                                   └─ normal boot:       report failure
-```
+The deployment status is persisted in FFS (`RPI_CONNECT_FFS_DEPLOYMENT_STATUS`)
+and moves `IDLE` → `DOWNLOADING` → `APPLYING` → `IDLE`. The diagram source is
+`ota-lifecycle.dot`; regenerate with `dot -Tsvg ota-lifecycle.dot -o ota-lifecycle.svg`.
 
 On boot, with status `APPLYING`, boot sync checks how the device started
 (`rpi_connect_ota_boot_is_flash_update()`):
